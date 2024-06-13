@@ -15,7 +15,7 @@ enum thread_status {
 	THREAD_RUNNING,     /* Running thread. */
 	THREAD_READY,       /* Not running but ready to run. */
 	THREAD_BLOCKED,     /* Waiting for an event to trigger. */
-	THREAD_DYING        /* About to be destroyed. */
+	THREAD_DYING,        /* About to be destroyed. */
 };
 
 /* Thread identifier type.
@@ -91,9 +91,14 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
-
+	int init_priority;
+	int sleep_ticks;						/* Thread sleeping time */
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
+
+	struct list donations; // 기부 해준 쓰레드들
+	struct list_elem donation_elem; // 
+	struct lock *wait_on_lock; // 내가 얻고 싶은 lock
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -126,6 +131,9 @@ tid_t thread_create (const char *name, int priority, thread_func *, void *);
 void thread_block (void);
 void thread_unblock (struct thread *);
 
+void thread_sleep(int64_t ticks);
+void thread_unsleep(int64_t ticks);
+
 struct thread *thread_current (void);
 tid_t thread_tid (void);
 const char *thread_name (void);
@@ -142,5 +150,8 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
+
+bool compare_priority(struct list_elem *a, struct list_elem *b, void* nothing);
+void preemption_yield (void);
 
 #endif /* threads/thread.h */

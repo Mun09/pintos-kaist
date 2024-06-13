@@ -28,6 +28,10 @@ bool lock_try_acquire (struct lock *);
 void lock_release (struct lock *);
 bool lock_held_by_current_thread (const struct lock *);
 
+void refresh_priority(void);
+void remove_with_lock(struct lock *);
+
+
 /* Condition variable. */
 struct condition {
 	struct list waiters;        /* List of waiting threads. */
@@ -38,6 +42,7 @@ void cond_wait (struct condition *, struct lock *);
 void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
 
+bool sema_compare(struct list_elem* , struct list_elem* , void* );
 /* Optimization barrier.
  *
  * The compiler will not reorder operations across an
