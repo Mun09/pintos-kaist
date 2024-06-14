@@ -96,6 +96,7 @@ timer_sleep (int64_t ticks) {
 	thread_sleep(start + ticks);
 }
 
+
 /* Suspends execution for approximately MS milliseconds. */
 void
 timer_msleep (int64_t ms) {
@@ -125,6 +126,19 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
+
+	if(thread_mlfqs) {
+		mlfqs_increment_recent_cpu();
+		if(ticks % 4 == 0) {
+			mlfqs_priority_update();
+		}
+
+		if(ticks % TIMER_FREQ == 0) {
+			mlfqs_recent_cpu_update();
+			mlfqs_update_load_avg();
+		}
+	}
+
 	thread_unsleep(ticks);
 }
 

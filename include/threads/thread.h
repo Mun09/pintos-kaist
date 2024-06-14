@@ -95,10 +95,14 @@ struct thread {
 	int sleep_ticks;						/* Thread sleeping time */
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
+	struct list_elem allelem;
 
 	struct list donations; // 기부 해준 쓰레드들
 	struct list_elem donation_elem; // 
 	struct lock *wait_on_lock; // 내가 얻고 싶은 lock
+
+	int nice;
+	int recent_cpu;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -153,5 +157,14 @@ void do_iret (struct intr_frame *tf);
 
 bool compare_priority(struct list_elem *a, struct list_elem *b, void* nothing);
 void preemption_yield (void);
+
+void mlfqs_update_priority(struct thread *);
+void mlfqs_priority_update(void);
+void mlfqs_increment_recent_cpu(void);
+void mlfqs_update_recent_cpu(struct thread *);
+void mlfqs_recent_cpu_update(void);
+void mlfqs_update_load_avg(void);
+
+int return_ready_threads(void);
 
 #endif /* threads/thread.h */

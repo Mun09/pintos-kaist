@@ -1,0 +1,14 @@
+FAIL
+Some tick counts were missing or differed from those expected by more than 25.
+thread   actual <-> expected explanation
+------ -------- --- -------- ----------------------------------------
+     0      729 >>> 672      Too big, by 32.
+     1      617 >>> 588      Too big, by 4.
+     2      509  =  492      
+     3      393  =  408      
+     4      296  =  316      
+     5      209  =  232      
+     6      141  =  152      
+     7       76  =  92       
+     8       33  =  40       
+     9        5  =  8        
