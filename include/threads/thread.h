@@ -95,6 +95,10 @@ struct thread {
 	int sleep_ticks;						/* Thread sleeping time */
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
+	struct list_elem allelem;
+
+	int nice;
+	int recent_cpu;
 
 	struct list donations; // 기부 해준 쓰레드들
 	struct list_elem donation_elem; // 
@@ -153,5 +157,12 @@ void do_iret (struct intr_frame *tf);
 
 bool compare_priority(struct list_elem *a, struct list_elem *b, void* nothing);
 void preemption_yield (void);
+
+void mlfqs_calculate_priority (struct thread *t);
+void mlfqs_calculate_recent_cpu (struct thread *t);
+void mlfqs_calculate_load_avg (void) ;
+void mlfqs_increment_recent_cpu (void);
+void mlfqs_recalculate_recent_cpu (void);
+void mlfqs_recalculate_priority (void);
 
 #endif /* threads/thread.h */
