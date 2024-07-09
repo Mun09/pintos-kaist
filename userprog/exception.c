@@ -105,6 +105,14 @@ kill (struct intr_frame *f) {
 	}
 }
 
+void
+_exit(int status) {
+	struct thread *curr = thread_current();
+	curr->exit_status = status;
+	printf("%s: exit(%d)\n", thread_name(), status);
+	thread_exit();
+}
+
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.
@@ -155,6 +163,7 @@ page_fault (struct intr_frame *f) {
 			not_present ? "not present" : "rights violation",
 			write ? "writing" : "reading",
 			user ? "user" : "kernel");
-	kill (f);
+	// kill (f);
+	exit(-1);
 }
 

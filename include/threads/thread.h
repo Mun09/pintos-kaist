@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
 #include "threads/interrupt.h"
 #ifdef VM
 #include "vm/vm.h"
@@ -113,6 +114,28 @@ struct thread {
 	struct supplemental_page_table spt;
 #endif
 
+	// 2-3
+	struct list child_list;
+	struct list_elem child_elem;
+
+	struct semaphore wait_sema;
+	int exit_status;
+
+	struct intr_frame parent_if;
+	struct semaphore fork_sema;
+	struct semaphore free_sema;
+
+	// 2-4 file descriptor
+	struct file **fdTable;
+	int fdIdx;
+
+	// 2-extra
+	int stdin_count;
+	int stdout_count;
+
+	// 2-5
+	struct file *running;
+
 	/* Owned by thread.c. */
 	struct intr_frame tf;               /* Information for switching */
 	unsigned magic;                     /* Detects stack overflow. */
@@ -164,5 +187,9 @@ void mlfqs_calculate_load_avg (void) ;
 void mlfqs_increment_recent_cpu (void);
 void mlfqs_recalculate_recent_cpu (void);
 void mlfqs_recalculate_priority (void);
+
+// 2-4 syscall - fork
+#define FDT_PAGES 3	// pages to allocate for file descriptor tables (thread_create, process_exit)
+#define FDCOUNT_LIMIT FDT_PAGES *(1 << 9)	// Limit fdIdx
 
 #endif /* threads/thread.h */

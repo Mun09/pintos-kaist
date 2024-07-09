@@ -182,7 +182,8 @@ thread_print_stats (void) {
 
 void preemption_yield (void) {
 	if(!list_empty(&ready_list) && 
-		thread_current()->priority <= list_entry(list_front(&ready_list), struct thread, elem)->priority
+		thread_current()->priority <= list_entry(list_front(&ready_list), struct thread, elem)->priority &&
+		!intr_context()	
 	) {
 		thread_yield();
 	}
@@ -220,6 +221,21 @@ thread_create (const char *name, int priority,
 	init_thread (t, name, priority);
 	tid = t->tid = allocate_tid ();
 
+	// 2-3 Parent and child
+	struct thread *cur = thread_current();
+	list_push_back(&cur->child_list, &t->child_elem);
+
+	// 2-4 file descriptor
+	t->fdTable = palloc_get_multiple(PAL_ZERO, FDT_PAGES);
+	if(t->fdTable == NULL)
+		return TID_ERROR;
+
+	t->fdIdx = 2;
+	t->fdTable[0] = 1;
+	t->fdTable[1] = 2;
+	t->stdin_count = 1;
+	t->stdout_count = 1;
+
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
 	t->tf.rip = (uintptr_t) kernel_thread;
@@ -238,7 +254,7 @@ thread_create (const char *name, int priority,
 
 	return tid;
 }
-
+	
 /* Puts the current thread to sleep.  It will not be scheduled
    again until awoken by thread_unblock().
 
@@ -493,6 +509,15 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->recent_cpu = RECENT_CPU_DEFAULT;
 
 	list_init(&(t->donations));
+
+	// 2-3
+	list_init(&t->child_list);
+	sema_init(&t->wait_sema, 0);
+	sema_init(&t->fork_sema, 0);
+	sema_init(&t->free_sema, 0);
+
+	// 2-5
+	t->running = NULL;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

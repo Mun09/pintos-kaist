@@ -10,4 +10,9 @@ int process_wait (tid_t);
 void process_exit (void);
 void process_activate (struct thread *next);
 
+struct thread *get_child_with_pid(int pid);
+void argument_stack(char **parse, int count, void **rsp);
+
+struct lock load_lock;
+
 #endif /* userprog/process.h */
