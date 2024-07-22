@@ -3,6 +3,8 @@
 
 #include "filesys/off_t.h"
 #include <stdbool.h>
+#include "filesys/file.h"
+#include "vm/vm.h"
 
 
 /* An open file. */
@@ -37,5 +39,12 @@ void file_allow_write (struct file *);
 void file_seek (struct file *, off_t);
 off_t file_tell (struct file *);
 off_t file_length (struct file *);
+
+void vm_file_init (void);
+bool file_backed_initializer (struct page *page, enum vm_type type, void *kva);
+void *do_mmap(void *addr, size_t length, int writable,
+		struct file *file, off_t offset);
+void do_munmap (void *va);
+bool lazy_load_segment_for_file(struct page *page, void *aux);
 
 #endif /* filesys/file.h */

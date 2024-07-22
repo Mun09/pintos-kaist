@@ -21,7 +21,7 @@
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
-void check_address(void* uaddr);
+struct page * check_address(void * addr);
 
 void halt (void);
 void exit (int status);
@@ -51,6 +51,9 @@ void remove_file_from_fdt(int fd);
 // 2-extra
 #define STDIN 1
 #define STDOUT 2
+
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset);
+void munmap (void *addr);
 
 
 /* System call.
@@ -114,9 +117,11 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			f->R.rax = filesize(f->R.rdi);
 			break;
 		case SYS_READ:
+			check_valid_buffer(f->R.rsi, f->R.rdx, f->rsp, 1);
 			f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
 			break;
 		case SYS_WRITE:
+			check_valid_buffer(f->R.rsi, f->R.rdx, f->rsp, 0);
 			f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
 			break;
 		case SYS_SEEK:
@@ -131,6 +136,12 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_DUP2:
 			f->R.rax = dup2(f->R.rdi, f->R.rsi);
 			break;
+		case SYS_MMAP:
+			f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+			break;
+		case SYS_MUNMAP:
+			munmap(f->R.rdi);
+			break;
 		default:
 			exit(-1);
 			break;
@@ -139,10 +150,27 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	// thread_exit ();
 }
 
-void check_address(void* uaddr) {
-	struct thread *cur = thread_current();
-	if (uaddr == NULL || is_kernel_vaddr(uaddr) || pml4_get_page(cur->pml4, uaddr) == NULL) {
+struct page * check_address(void * addr) {
+	if (addr == NULL || is_kernel_vaddr(addr)) {
 		exit(-1);
+	}
+
+	return spt_find_page(&thread_current()->spt, addr);
+}
+
+void check_valid_buffer(void *buffer, unsigned size, void *rsp, bool to_write) {
+	for (int i = 0; i < size; i++) {
+		struct page *page = check_address(buffer + i);
+		
+		/* 해당 주소가 포함된 페이지가 spt에 없는 경우 */
+		if (page == NULL) {
+			exit(-1);
+		}
+
+		/* write 시스템 콜을 호출했는데 쓰기가 허용되지 않는 페이지인 경우 */
+		if (to_write == true && page->writable == false) {
+			exit(-1);
+		}
 	}
 }
 
@@ -425,4 +453,24 @@ void remove_file_from_fdt(int fd)
 		return;
 
 	cur->fdTable[fd] = NULL;
+}
+
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset){
+	// Fail : map to i/o console, zero length, map at 0, addr not page-aligned
+	if(fd == 0 || fd == 1 || length == 0 || addr == 0 || pg_ofs(addr) != 0 || offset > PGSIZE)
+		return NULL;
+
+	// Find file by fd
+	struct file *file = find_file_by_fd(fd);	
+
+	// Fail : NULL file, file length is zero
+	if (file == NULL || file_length(file) == 0)
+		return NULL;
+
+	return do_mmap(addr, length, writable, file, offset);
+}
+
+// Project 3-3 mmap
+void munmap (void *addr){
+	do_munmap(addr);
 }

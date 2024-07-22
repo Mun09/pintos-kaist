@@ -7,6 +7,10 @@
         "syscall.h": "c",
         "thread.h": "c",
         "stdlib.h": "c",
-        "filesys.h": "c"
+        "filesys.h": "c",
+        "disk.h": "c",
+        "vm.h": "c",
+        "bitmap.h": "c",
+        "file.h": "c"
     }
 }

@@ -3,6 +3,13 @@
 #include <stdbool.h>
 #include "threads/palloc.h"
 
+#include <hash.h>
+#include "threads/mmu.h"
+#include "threads/vaddr.h"
+#include <list.h>
+
+#define MIN(X,Y) ((X) < (Y) ? (X) : (Y))
+
 enum vm_type {
 	/* page not initialized */
 	VM_UNINIT = 0,
@@ -46,6 +53,9 @@ struct page {
 	struct frame *frame;   /* Back reference for frame */
 
 	/* Your implementation */
+	bool writable;
+	struct hash_elem hash_elem;
+	int page_cnt;
 
 	/* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */
@@ -63,6 +73,7 @@ struct page {
 struct frame {
 	void *kva;
 	struct page *page;
+	struct list_elem elem;
 };
 
 /* The function table for page operations.
@@ -85,6 +96,7 @@ struct page_operations {
  * We don't want to force you to obey any specific design for this struct.
  * All designs up to you for this. */
 struct supplemental_page_table {
+	struct hash spt_hash;
 };
 
 #include "threads/thread.h"
@@ -108,5 +120,14 @@ bool vm_alloc_page_with_initializer (enum vm_type type, void *upage,
 void vm_dealloc_page (struct page *page);
 bool vm_claim_page (void *va);
 enum vm_type page_get_type (struct page *page);
+
+struct lazy_load_info {
+	struct file *file;
+	size_t page_read_bytes;
+	size_t page_zero_bytes;
+	off_t offset;
+};
+
+void remove_page(struct page *page);
 
 #endif  /* VM_VM_H */

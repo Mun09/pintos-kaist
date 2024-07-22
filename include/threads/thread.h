@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "threads/synch.h"
 #include "threads/interrupt.h"
+#include "filesys/file.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -112,6 +113,7 @@ struct thread {
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
 	struct supplemental_page_table spt;
+	void *stack_bottom;
 #endif
 
 	// 2-3
@@ -135,6 +137,10 @@ struct thread {
 
 	// 2-5
 	struct file *running;
+
+	//P3
+	uint64_t rsp;
+
 
 	/* Owned by thread.c. */
 	struct intr_frame tf;               /* Information for switching */

@@ -27,7 +27,7 @@ static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
 
-void argument_stack(char **parse, int count, void **rsp);
+void argument_stack (int argc, char **argv, struct intr_frame *if_);
 
 /* General process initializer for initd and other process. */
 static void
@@ -253,18 +253,23 @@ error:
 int
 process_exec (void *f_name) {
 	char *file_name = f_name;
+	char *file_name_copy[48];
 	bool success;
 
-	char *argv[128]; // argument 배열
-    int argc = 0;    // argument 개수
-    char *token, *save_ptr;    
-    token = strtok_r(file_name, " ", &save_ptr);
+	memcpy(file_name_copy, file_name, strlen(file_name)+1); 
 
-    while (token != NULL) {
-        argv[argc] = token;
-        token = strtok_r(NULL, " ", &save_ptr);
-		argc++;
-    }
+	// char *argv[128]; // argument 배열
+    // int argc = 0;    // argument 개수
+    // char *token, *save_ptr;    
+    // token = strtok_r(file_name, " ", &save_ptr);
+
+    // while (token != NULL) {
+    //     argv[argc] = token;
+    //     token = strtok_r(NULL, " ", &save_ptr);
+	// 	argc++;
+    // }
+
+
 
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
@@ -277,21 +282,36 @@ process_exec (void *f_name) {
 	/* We first kill the current context */
 	process_cleanup ();
 
+	int token_count = 0;
+	char *token, *last;
+	char *arg_list[64]; // arg_list라는 리스트를 생성하여 각 인자의 char *를 저장한다. 프로그램 명은 arg_list[0]에 저장되며, arg_list[1]부터 다른 인자들이 저장된다.
+	char *tmp_save = token;
+
+	token = strtok_r(file_name_copy, " ", &last); 
+	arg_list[token_count] = token;
+
+	while (token != NULL) {
+		token = strtok_r(NULL, " ", &last); /* 여백 ' '을 기준으로 문자열을 분할하여, 각 인자에 sentinel '\n'을 추가하여 저장한다. */ // sentinel : 데이터의 끝을 알리는 데 사용되는 값
+		token_count++; 						// ㄴ ex) cmd line이 rm -rf 인 경우 arg_list에는 [rm\0, -rf\0, \0]의 형태로 저장된다.
+		arg_list[token_count] = token;		// token_count에는 파일명을 제외한 인자의 갯수(??왜 ++인데 인자의 갯수지?->while문 돌면서 filename분할한거 하나씩 셈)가 저장된다.
+	}
+
+#ifdef VM
+	supplemental_page_table_init(&thread_current()->spt);
+#endif
+
 	lock_acquire(&load_lock);
 	success = load (file_name, &_if);
 	lock_release(&load_lock);
 
+	palloc_free_page (file_name);
+
 	if (!success) {
-		palloc_free_page (file_name);
 		return -1;
 	}
 	
-	argument_stack(argv, argc, &(_if.rsp)); // 함수 내부에서 parse와 rsp의 값을 직접 변경하기 위해 주소 전달
+	argument_stack(token_count, arg_list, &_if);  // 함수 내부에서 parse와 rsp의 값을 직접 변경하기 위해 주소 전달
     
-	_if.R.rdi = argc;
-    _if.R.rsi = _if.rsp + sizeof(void*);
-
-	palloc_free_page (file_name);
 
 	// hex_dump(_if.rsp, _if.rsp, KERN_BASE - _if.rsp, true);
 
@@ -301,32 +321,60 @@ process_exec (void *f_name) {
 	NOT_REACHED ();
 }
 
-void argument_stack(char **argv, int argc, void **rsp) // 주소를 전달받았으므로 이중 포인터 사용
-{
-	for(int i=argc-1; i>=0; i--) {
-		int n = strlen(argv[i]) + 1;
-		(*rsp) -= n;
-		memcpy(*rsp, argv[i], n);
-		argv[i] = (char *)(*rsp);
+void argument_stack (int argc, char **argv, struct intr_frame *if_) { // parsing할 인자들을 담을 stack 함수
+	char *arg_address[128];
+
+	/* Insert arguments' addresses */
+	for (int i = argc - 1; i >= 0; i--) { // argv[n]부터 argv[0]까지 돌아야 하니까 i>=0까지 돌아야 한다
+		int argv_len = strlen(argv[i]); 
+		if_ -> rsp = if_ -> rsp - (argv_len + 1); // user stack의 최상단부터 각 배열의 문자열의 크기만큼 담는다 // if_ -> rsp는 user stack에서 현재 위치를 가리키는 stack pointer (스택의 꼭대기)
+		// 각 인자에서 인자의 크기를 읽고 (각 인자에는 sentinel이 포함되어 있기 때문에 1을 더한다), 그 크기만큼 rsp를 내린다.
+		memcpy(if_ -> rsp, argv[i], argv_len + 1); // memcpy(a, b, size); b에서 size만큼을 읽어서 a에 복사한다. -> 현재 위치를 가리키는 스택 포인터 rsp에 인자를 복사한다.
+		arg_address[i] = if_ -> rsp;
 	}
 
-	int padding = (int)*rsp % 8;
-	if(padding != 0) {
-		(*rsp) -= padding;
-		memset(*rsp, 0, padding);
+	/* Insert padding for word-align조정 */
+	/* word-align을 실행한다. 64비트 환경이기 때문에 8바이트 단위로 정렬한다. */
+	while (if_ -> rsp % 8 != 0) {
+	if_ -> rsp--; // rsp(스택 포인터 레지스터, 스택 꼭대기)를 8의 배수에 맞추기 위해 값을 내린다.
+	*(uint8_t *)(if_ -> rsp) = 0;
 	}
 
-	*rsp -= sizeof(char*);
-	memset(*rsp, 0, sizeof(char*));
+	/* Insert addresses of strings including sentinel 센티넬이 포함된 문자열의 주소를 삽입 */
+	for (int i = argc; i >= 0; i--) {
+		if_ -> rsp = if_ -> rsp - 8;
 
-	for(int i=argc-1; i>=0; i--) {
-		*rsp -= sizeof(char *);
-		memcpy(*rsp, &argv[i], 8);
-		// *((char **)*rsp) = argv[i];
+		if (i == argc) // ex) i가 처음에 들어왔을 때 4라면 -> argv[3]부터인데 없으니까 0 으로 채운다 ㄱ
+			memset(if_ -> rsp, 0, sizeof(char **)); // 왜 0으로 채움? -> [ 0x4747ffe0 | argv[4] | 0 | char * ]
+			// memset함수는 어떤 메모리의 시작점부터 연속된 범위를 어떤 값으로(바이트 단위) 모두 지정하고 싶을 때 사용하는 함수이다.
+			// if 조건문에서 memset()을 사용하면 3개의 인자를 입력 받았을 때, 밑에서부터 3개의 주소를 새기고(Address->Date영역으로) 마지막에 0을 추가한다
+
+			else // arg_address에 저장한 주소를 입력한다. memcpy()의 인자로 포인터를 입력하기 때문에 arg_address[i]를 입력한다.
+					memcpy(if_ -> rsp, &arg_address[i], sizeof(char **)); // ** : pointer to pointer. char** is pointer to a char*			
 	}
 
-	*rsp -= sizeof(void *);
-	memset(*rsp, 0, sizeof(void *));
+	/* 또는 if문 빼고
+	// Pointers to the argument strings
+	(*rsp) -= 8;
+	**(char ***)rsp = 0;
+
+	for (int i = argc - 1; i >= 0; i--) {
+		(*rsp) -= 8;
+		**(char ***)rsp = argv[i];
+	}
+	*/
+
+	/* Fake return address */
+	if_ -> rsp = if_ -> rsp - 8;
+	memset(if_ -> rsp, 0, sizeof(void *));
+	/* 인자의 주소값을 입력하고 그 밑에는 거짓 return address(함수를 호출하는 부분의 다음 수행 명령어 주소)를 입력한다. 
+		return address는 프로세스가 함수를 호출하면 해당 함수는 독자적인 stack을 가지고 
+		함수가 종료되면 다시 프로세스로 돌아가기 위한 코드 영역 주소를 입력하지만, 유저 프로그램을 실행하기 위한 준비 단계이므로 돌아올 표기를 할 필요가 없다. 
+		그렇기 때문에 0으로만 구성된 거짓 return address를 입력한다. */
+
+	if_ -> R.rdi = argc;
+	if_ -> R.rsi = if_ -> rsp + 8; 
+
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -386,7 +434,9 @@ process_cleanup (void) {
 	struct thread *curr = thread_current ();
 
 #ifdef VM
-	supplemental_page_table_kill (&curr->spt);
+	if(!hash_empty(&curr->spt.spt_hash)) {
+		supplemental_page_table_kill (&curr->spt);
+	}
 #endif
 
 	uint64_t *pml4;
@@ -491,6 +541,15 @@ load (const char *file_name, struct intr_frame *if_) {
 	int i;
 
 	/// argument passing ///
+	char *argv_list[64];
+	char *token, *save_ptr;
+	int argv_cnt = 0;
+	
+	for (token = strtok_r (file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
+   		argv_list[argv_cnt] = token;
+		argv_cnt++;
+	}
+
 
 
 	/* Allocate and activate page directory. */
@@ -586,6 +645,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
 
 	success = true;
+	// argument_stack(if_, argv_cnt, argv_list);
 	
 done:
 	/* We arrive here whether the load is successful or not. */
@@ -746,6 +806,21 @@ lazy_load_segment (struct page *page, void *aux) {
 	/* TODO: Load the segment from the file */
 	/* TODO: This called when the first page fault occurs on address VA. */
 	/* TODO: VA is available when calling this function. */
+	struct file *file = ((struct container *)aux)->file;
+	off_t offsetof = ((struct container *)aux)->offset;
+	size_t page_read_bytes = ((struct container *)aux)->page_read_bytes;
+	size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+	file_seek(file, offsetof);
+
+	if (file_read(file, page->frame->kva, page_read_bytes) != (int)page_read_bytes) {
+		palloc_free_page(page->frame->kva);
+		return false;
+	}
+
+	memset(page->frame->kva + page_read_bytes, 0, page_zero_bytes);
+
+	return true;
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
@@ -777,29 +852,62 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
+		struct container *container = (struct container *)malloc(sizeof(struct container));
+		*container = (struct container) {
+			.file = file,
+			.page_read_bytes = page_read_bytes,
+			.offset = ofs
+		};
+		// container->file = file;
+		// container->page_read_bytes = page_read_bytes;
+		// container->offset = ofs;
+
 		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
-					writable, lazy_load_segment, aux))
-			return false;
+					writable, lazy_load_segment, container)) {
+						free(container);
+						return false;
+					}
 
 		/* Advance. */
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
 		upage += PGSIZE;
+		ofs += page_read_bytes;
 	}
 	return true;
 }
 
 /* Create a PAGE of stack at the USER_STACK. Return true on success. */
 static bool
-setup_stack (struct intr_frame *if_) {
+setup_stack(struct intr_frame *if_)
+{
 	bool success = false;
-	void *stack_bottom = (void *) (((uint8_t *) USER_STACK) - PGSIZE);
+	void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
 
 	/* TODO: Map the stack on stack_bottom and claim the page immediately.
 	 * TODO: If success, set the rsp accordingly.
 	 * TODO: You should mark the page is stack. */
 	/* TODO: Your code goes here */
+
+	// No need to load lazily
+
+	// Q. anon page로 init? - 어떻게 하지
+	// 바로 anon page 만드는게 아니라, vm_alloc_page 호출해서 unint page 만든 후, 바로 vm_claim_page해서 frame 할당 해주기
+	
+	vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, true); // Create uninit page for stack; will become anon page
+	success = vm_claim_page(stack_bottom); // find page corresponding to user vaddr 'stack_bottom' and get frame mapped
+	if (success){
+		if_->rsp = USER_STACK; //setting rsp
+
+		#ifdef DEBUG_VM
+		struct supplemental_page_table *spt = &thread_current ()->spt;
+		struct page * stack_bottom_page = spt_find_page (spt, stack_bottom);
+		printf("First stack page - %p\n\n", stack_bottom_page->va);
+		#endif
+	}
+	else{
+		printf("Failed on setup_stack\n\n");
+	}
 
 	return success;
 }

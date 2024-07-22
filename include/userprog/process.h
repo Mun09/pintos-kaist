@@ -11,8 +11,14 @@ void process_exit (void);
 void process_activate (struct thread *next);
 
 struct thread *get_child_with_pid(int pid);
-void argument_stack(char **parse, int count, void **rsp);
+// void argument_stack(char **parse, int count, void **rsp);
 
 struct lock load_lock;
 
 #endif /* userprog/process.h */
+
+struct container {
+    struct file *file;
+    off_t offset;
+    size_t page_read_bytes;
+};
