@@ -7,6 +7,7 @@
         "syscall.h": "c",
         "thread.h": "c",
         "stdlib.h": "c",
-        "filesys.h": "c"
+        "filesys.h": "c",
+        "interrupt.h": "c"
     }
 }

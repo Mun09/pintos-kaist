@@ -20,6 +20,8 @@
 #include "intrinsic.h"
 #ifdef VM
 #include "vm/vm.h"
+#include "threads/malloc.h"
+#include "userprog/syscall.h"
 #endif
 
 static void process_cleanup (void);
@@ -28,6 +30,10 @@ static void initd (void *f_name);
 static void __do_fork (void *);
 
 void argument_stack(char **parse, int count, void **rsp);
+
+/* --- Project 3 - VM --- */
+static bool setup_stack (struct intr_frame *if_);
+static void child_wait_caller (struct thread *curr);
 
 /* General process initializer for initd and other process. */
 static void
@@ -74,6 +80,7 @@ initd (void *f_name) {
 #endif
 
 	// process_init ();
+	lock_init(&file_rw_lock);
 
 	if (process_exec (f_name) < 0)
 		PANIC("Fail to launch initd\n");
@@ -358,6 +365,18 @@ process_wait (tid_t child_tid UNUSED) {
 	return exit_status;
 }
 
+static void
+child_wait_caller (struct thread *curr) {
+  struct list_elem *e;
+
+  if (!list_empty (&curr->child_list)) {
+    for (e = list_begin (&curr->child_list); e != list_end (&curr->child_list); e = list_next (e)) {
+      struct thread *t = list_entry (e, struct thread, child_elem);
+      process_wait (t->tid);
+    }
+  }
+}
+
 /* Exit the process. This function is called by thread_exit (). */
 void
 process_exit (void) {
@@ -367,15 +386,19 @@ process_exit (void) {
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
 
+	struct list_elem *e;
+
+	child_wait_caller(curr);
+
+	file_close(curr->running);
+	process_cleanup ();
+
 	for(int i=0; i<FDCOUNT_LIMIT; i++) {
 		close(i);
 	}
 
 	palloc_free_multiple(curr->fdTable, FDT_PAGES);
-	file_close(curr->running);
 	
-	process_cleanup ();
-
 	sema_up(&curr->wait_sema);
 	sema_down(&curr->free_sema);
 }
@@ -500,7 +523,10 @@ load (const char *file_name, struct intr_frame *if_) {
 	process_activate (thread_current ());
 
 	/* Open executable file. */
+	lock_acquire(&file_rw_lock);
 	file = filesys_open (file_name);
+	lock_release(&file_rw_lock);
+
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
@@ -737,15 +763,28 @@ install_page (void *upage, void *kpage, bool writable) {
 			&& pml4_set_page (t->pml4, upage, kpage, writable));
 }
 #else
-/* From here, codes will be used after project 3.
- * If you want to implement the function for only project 2, implement it on the
- * upper block. */
 
-static bool
+bool
 lazy_load_segment (struct page *page, void *aux) {
-	/* TODO: Load the segment from the file */
-	/* TODO: This called when the first page fault occurs on address VA. */
-	/* TODO: VA is available when calling this function. */
+  file_info *f_info = aux;
+  size_t page_zero_bytes = PGSIZE - f_info->read_bytes;
+  void *read_addr = pg_round_down ((void *)page->frame->kva);
+
+  if (page->operations->type == VM_FILE) {
+    memcpy (page->file.aux, f_info, sizeof (file_info));
+  }
+  else if (page->operations->type == VM_ANON) {
+    memcpy (page->anon.aux, f_info, sizeof (file_info));
+  }
+
+  file_seek(f_info->file, f_info->ofs);
+  if (file_read (f_info->file, read_addr, f_info->read_bytes) != (int)f_info->read_bytes) {
+    palloc_free_page (pg_round_down (page));
+    return false;
+  }
+  memset (read_addr + f_info->read_bytes, 0, page_zero_bytes);
+
+  return true;
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
@@ -775,18 +814,23 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		 * and zero the final PAGE_ZERO_BYTES bytes. */
 		size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
+    file_info *f_info;
 
-		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
-		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
-					writable, lazy_load_segment, aux))
-			return false;
-
+    if (!(f_info = malloc (sizeof(file_info)))) {
+      return false;
+    }
+    f_info->file = file;
+    f_info->read_bytes = page_read_bytes;
+    f_info->ofs = ofs;
+    if (!vm_alloc_page_with_initializer (VM_ANON, upage, writable, lazy_load_segment, f_info)) {
+      return false;
+    }
 		/* Advance. */
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
 		upage += PGSIZE;
-	}
+    ofs += page_read_bytes;
+  }
 	return true;
 }
 
@@ -794,15 +838,16 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (struct intr_frame *if_) {
 	bool success = false;
-	void *stack_bottom = (void *) (((uint8_t *) USER_STACK) - PGSIZE);
+  void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
 
-	/* TODO: Map the stack on stack_bottom and claim the page immediately.
-	 * TODO: If success, set the rsp accordingly.
-	 * TODO: You should mark the page is stack. */
-	/* TODO: Your code goes here */
+  if (vm_alloc_page (VM_ANON | IS_STACK, stack_bottom, 1) && vm_claim_page (stack_bottom)) {
+    if_->rsp = USER_STACK;
+    success = true;
+  }
 
-	return success;
+  return success;
 }
+
 #endif /* VM */
 
 struct thread *

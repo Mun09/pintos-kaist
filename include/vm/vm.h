@@ -4,7 +4,8 @@
 #include "threads/palloc.h"
 
 /* Project 3 */
-#include "hash.h"
+#include "lib/kernel/hash.h"
+#include <stdlib.h>
 
 enum vm_type {
 	/* page not initialized */
@@ -20,7 +21,7 @@ enum vm_type {
 
 	/* Auxillary bit flag marker for store information. You can add more
 	 * markers, until the value is fit in the int. */
-	VM_MARKER_0 = (1 << 3),
+	IS_STACK = (1 << 3),
 	VM_MARKER_1 = (1 << 4),
 
 	/* DO NOT EXCEED THIS VALUE. */
@@ -50,6 +51,7 @@ struct page {
 
 	/* Your implementation */
 	struct hash_elem h_elem;
+	uint32_t file_length;
 
 	/* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */
@@ -63,10 +65,15 @@ struct page {
 	};
 };
 
+struct list framelist;
+struct lock spt_lock;
+
 /* The representation of "frame" */
 struct frame {
 	void *kva;
 	struct page *page;
+
+	struct list_elem f_elem;
 };
 
 /* The function table for page operations.
@@ -118,5 +125,7 @@ enum vm_type page_get_type (struct page *page);
 unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
 bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
 struct page * page_lookup (const void *address, struct supplemental_page_table *spt);
+
+void print_spt(void);
 
 #endif  /* VM_VM_H */
